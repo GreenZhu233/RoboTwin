@@ -13,6 +13,27 @@ class LRScheduleConfig(Protocol):
 
 
 @dataclasses.dataclass(frozen=True)
+class ConstantScheduleWithWarmup(LRScheduleConfig):
+    """Constant learning rate schedule with warmup."""
+
+    warmup_steps: int = 1_000
+    peak_lr: float = 2.5e-5
+
+    def create(self) -> optax.Schedule:
+        return optax.join_schedules(
+            [
+                optax.linear_schedule(
+                    init_value=0.0,
+                    end_value=self.peak_lr,
+                    transition_steps=self.warmup_steps,
+                ),
+                optax.constant_schedule(self.peak_lr),
+            ],
+            [self.warmup_steps],
+        )
+
+
+@dataclasses.dataclass(frozen=True)
 class CosineDecaySchedule(LRScheduleConfig):
     """Cosine decay schedule with warmup."""
 

@@ -7,7 +7,10 @@ seed: null
 instruction_type: unseen
 
 # Add Parameters You Need
-train_config_name: null
-model_name: null
-checkpoint_id: 30000
-pi0_step: 50
+train_config_name: pi05_base_finetune_on_robotwin_clean_randomized_joint_training
+model_name: pi05
+checkpoint_id: 1
+pi0_step: 16
+
+# Note: Robot config (left_robot_file, right_robot_file) is automatically
+# loaded from task_config's embodiment field in script/eval_policy.py

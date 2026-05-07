@@ -1,3 +1,4 @@
+import dataclasses
 import logging
 import os
 import pathlib
@@ -23,6 +24,9 @@ def create_trained_policy(
     norm_stats: dict[str, transforms.NormStats] | None = None,
     pytorch_device: str | None = None,
     robotwin_repo_id: str | None = None,
+    denoise_steps_range: tuple[int, int] | None = None,
+    pi0_step: int = 16,
+    robot_config: dict | None = None,
 ) -> _policy.Policy:
     """Create a policy from a trained checkpoint.
 
@@ -59,7 +63,7 @@ def create_trained_policy(
     data_config = train_config.data.create(train_config.assets_dirs, train_config.model)
     if norm_stats is None:
         if robotwin_repo_id is not None:
-            data_config.asset_id = robotwin_repo_id
+            data_config = dataclasses.replace(data_config, asset_id=robotwin_repo_id)
         # We are loading the norm stats from the checkpoint instead of the config assets dir to make sure
         # that the policy is using the same normalization stats as the original training process.
         if data_config.asset_id is None:
@@ -75,6 +79,11 @@ def create_trained_policy(
         except ImportError:
             pytorch_device = "cpu"
 
+    # Build metadata with robot_config for forward kinematics
+    metadata = dict(train_config.policy_metadata or {})
+    if robot_config is not None:
+        metadata["robot_config"] = robot_config
+    
     return _policy.Policy(
         model,
         transforms=[
@@ -91,7 +100,9 @@ def create_trained_policy(
             *repack_transforms.outputs,
         ],
         sample_kwargs=sample_kwargs,
-        metadata=train_config.policy_metadata,
+        metadata=metadata,
         is_pytorch=is_pytorch,
         pytorch_device=pytorch_device if is_pytorch else None,
+        denoise_steps_range=denoise_steps_range,
+        pi0_step = pi0_step
     )

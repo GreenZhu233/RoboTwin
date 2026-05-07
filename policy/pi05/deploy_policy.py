@@ -25,7 +25,18 @@ def encode_obs(observation):
 def get_model(usr_args):
     train_config_name, model_name, checkpoint_id, pi0_step = (usr_args["train_config_name"], usr_args["model_name"],
                                                               usr_args["checkpoint_id"], usr_args["pi0_step"])
-    return PI0(train_config_name, model_name, checkpoint_id, pi0_step)
+    min_denoise_steps = usr_args.get("min_denoise_steps", 10)
+    max_denoise_steps = usr_args.get("max_denoise_steps", 10)
+    
+    # Get robot config from embodiment config (supports multiple robot types)
+    left_robot_file = usr_args.get("left_robot_file", None)
+    right_robot_file = usr_args.get("right_robot_file", None)
+    
+    if min_denoise_steps == max_denoise_steps == 10:
+        return PI0(train_config_name, model_name, checkpoint_id, pi0_step, 
+                   left_robot_file=left_robot_file, right_robot_file=right_robot_file)
+    return PI0(train_config_name, model_name, checkpoint_id, pi0_step, (min_denoise_steps, max_denoise_steps),
+               left_robot_file=left_robot_file, right_robot_file=right_robot_file)
 
 
 def eval(TASK_ENV, model, observation):
@@ -39,7 +50,10 @@ def eval(TASK_ENV, model, observation):
 
     # ======== Get Action ========
 
-    actions = model.get_action()[:model.pi0_step]
+    result = model.get_action()
+    actions = result["actions"][:model.pi0_step]
+    inference_time = result["policy_timing"]["infer_s"]
+    denoise_steps = result.get("num_steps", 10)
 
     for action in actions:
         TASK_ENV.take_action(action)
@@ -48,7 +62,7 @@ def eval(TASK_ENV, model, observation):
         model.update_observation_window(input_rgb_arr, input_state)
 
     # ============================
-
+    return inference_time, denoise_steps
 
 def reset_model(model):
     model.reset_obsrvationwindows()

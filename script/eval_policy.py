@@ -1,14 +1,17 @@
 import sys
 import os
 import subprocess
+import time
 
 sys.path.append("./")
 sys.path.append(f"./policy")
 sys.path.append("./description/utils")
+from description.utils.generate_episode_instructions import generate_episode_descriptions
 from envs import CONFIGS_PATH
 from envs.utils.create_actor import UnStableError
 
 import numpy as np
+import pandas as pd
 from pathlib import Path
 from collections import deque
 import traceback
@@ -19,7 +22,7 @@ import importlib
 import argparse
 import pdb
 
-from generate_episode_instructions import *
+# from generate_episode_instructions import *
 
 current_file_path = os.path.abspath(__file__)
 parent_directory = os.path.dirname(current_file_path)
@@ -151,9 +154,15 @@ def main(usr_args):
     print("\n==================================")
 
     TASK_ENV = class_decorator(args["task_name"])
+    TASK_ENV.eval_video_path = None
+    args["eval_video_save_dir"] = None
     args["policy_name"] = policy_name
     usr_args["left_arm_dim"] = len(args["left_embodiment_config"]["arm_joints_name"][0])
     usr_args["right_arm_dim"] = len(args["right_embodiment_config"]["arm_joints_name"][1])
+    
+    # Pass embodiment config to model for forward kinematics
+    usr_args["left_robot_file"] = args["left_robot_file"]
+    usr_args["right_robot_file"] = args["right_robot_file"]
 
     seed = usr_args["seed"]
 
@@ -163,24 +172,39 @@ def main(usr_args):
     topk = 1
 
     model = get_model(usr_args)
-    st_seed, suc_num = eval_policy(task_name,
-                                   TASK_ENV,
-                                   args,
-                                   model,
-                                   st_seed,
-                                   test_num=test_num,
-                                   video_size=video_size,
-                                   instruction_type=instruction_type)
+
+    st_seed, suc_num, _eval_elapsed = eval_policy(task_name,
+                                                    TASK_ENV,
+                                                    args,
+                                                    model,
+                                                    st_seed,
+                                                    test_num=test_num,
+                                                    video_size=video_size,
+                                                    instruction_type=instruction_type,
+                                                    save_dir=save_dir)
     suc_nums.append(suc_num)
 
     topk_success_rate = sorted(suc_nums, reverse=True)[:topk]
+
+    # Analyze csv data
+    df = pd.read_csv(os.path.join(save_dir, "record.csv"))
 
     file_path = os.path.join(save_dir, f"_result.txt")
     with open(file_path, "w") as file:
         file.write(f"Timestamp: {current_time}\n\n")
         file.write(f"Instruction Type: {instruction_type}\n\n")
+        file.write(f"policy_name: {policy_name}\n")
+        file.write(f"task_name: {task_name}\n")
+        file.write(f"task_config: {task_config}\n")
+        file.write(f"train_config_name: {usr_args['train_config_name']}\n")
+        file.write(f"model_name: {usr_args['model_name']}\n")
+        file.write(f"seed: {seed}\n")
+        file.write(f"min_denoise_steps: {usr_args['min_denoise_steps']}\n")
+        file.write(f"max_denoise_steps: {usr_args['max_denoise_steps']}\n\n")
+        file.write(f"Total Eval Time: {_eval_elapsed}s\n\n")
         # file.write(str(task_reward) + '\n')
         file.write("\n".join(map(str, np.array(suc_nums) / test_num)))
+        file.write("\n" + df.describe().to_string())
 
     print(f"Data has been saved to {file_path}")
     # return task_reward
@@ -193,7 +217,8 @@ def eval_policy(task_name,
                 st_seed,
                 test_num=100,
                 video_size=None,
-                instruction_type=None):
+                instruction_type=None,
+                save_dir=None):
     print(f"\033[34mTask Name: {args['task_name']}\033[0m")
     print(f"\033[34mPolicy Name: {args['policy_name']}\033[0m")
 
@@ -214,6 +239,73 @@ def eval_policy(task_name,
     clear_cache_freq = args["clear_cache_freq"]
 
     args["eval_mode"] = True
+
+
+    # ==================== Warmup ====================
+    print("Warming up model...")
+    warmup_cnt = 0
+    warmup_seed = st_seed + 999
+    min_denoise_steps = usr_args['min_denoise_steps']
+    max_denoise_steps = usr_args['max_denoise_steps']
+
+    # Track inference times for each denoise_steps value to ensure all are warmed up
+    denoise_times = {d: [] for d in range(min_denoise_steps, max_denoise_steps + 1)}
+    max_warmup_episodes = 20
+    cold_threshold_ms = 200  # cold CUDA compilation takes 1000+ms, warm is <100ms
+
+    while warmup_cnt < max_warmup_episodes:
+        try:
+            TASK_ENV.setup_demo(now_ep_num=-1, seed=warmup_seed, is_test=True, **args)
+        except UnStableError:
+            print(f"Warmup: unstable seed {warmup_seed}, retrying...")
+            TASK_ENV.close_env()
+            warmup_seed += 1
+            continue
+        except Exception:
+            print(f"Warmup: error at seed {warmup_seed}, retrying...")
+            TASK_ENV.close_env()
+            warmup_seed += 1
+            continue
+        reset_func(model)
+        TASK_ENV.set_instruction(instruction="warmup")
+        while TASK_ENV.take_action_cnt < TASK_ENV.step_lim:
+            observation = TASK_ENV.get_obs()
+            inference_time, denoise_steps = eval_func(TASK_ENV, model, observation)
+            if min_denoise_steps <= denoise_steps <= max_denoise_steps:
+                denoise_times[denoise_steps].append(inference_time)
+            if TASK_ENV.eval_success:
+                break
+        TASK_ENV.close_env()
+        warmup_cnt += 1
+        warmup_seed += 1
+
+        # Check if all denoise_steps are sufficiently warmed up
+        all_ready = True
+        for d in range(min_denoise_steps, max_denoise_steps + 1):
+            times = denoise_times[d]
+            if len(times) < 2:
+                all_ready = False
+                break
+            if times[-1] > cold_threshold_ms:  # still in CUDA compilation phase
+                all_ready = False
+                break
+        if all_ready:
+            print(f"All denoise_steps ({min_denoise_steps}-{max_denoise_steps}) warmed up after {warmup_cnt} episodes.")
+            break
+
+    if warmup_cnt >= max_warmup_episodes:
+        print(f"Warning: warmup reached max episodes ({max_warmup_episodes}), some denoise_steps may not be fully warmed up:")
+        for d in range(min_denoise_steps, max_denoise_steps + 1):
+            times = denoise_times[d]
+            print(f"  denoise_steps={d}: seen {len(times)} times, last={times[-1]:.1f}ms" if times else f"  denoise_steps={d}: NEVER seen")
+
+    print("Warmup complete.")
+    # ================================================
+
+    if save_dir:
+        with open(os.path.join(save_dir, "record.csv"), "w") as f:
+            f.write("test_num,denoise_steps,inference_time\n")
+    _eval_start = time.time()
 
     while succ_seed < test_num:
         render_freq = args["render_freq"]
@@ -292,7 +384,10 @@ def eval_policy(task_name,
         reset_func(model)
         while TASK_ENV.take_action_cnt < TASK_ENV.step_lim:
             observation = TASK_ENV.get_obs()
-            eval_func(TASK_ENV, model, observation)
+            inference_time, denoise_steps = eval_func(TASK_ENV, model, observation)
+            if save_dir:
+                with open(os.path.join(save_dir, "record.csv"), "a") as f:
+                    f.write(f"{TASK_ENV.test_num},{denoise_steps},{inference_time}\n")
             if TASK_ENV.eval_success:
                 succ = True
                 break
@@ -321,7 +416,8 @@ def eval_policy(task_name,
         # TASK_ENV._take_picture()
         now_seed += 1
 
-    return now_seed, TASK_ENV.suc
+    _eval_elapsed = time.time() - _eval_start
+    return now_seed, TASK_ENV.suc, _eval_elapsed
 
 
 def parse_args_and_config():
