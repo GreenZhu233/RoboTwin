@@ -28,7 +28,7 @@ import yaml
 class PI0:
 
     def __init__(self, train_config_name, model_name, checkpoint_id, pi0_step, denoise_steps_range = None, 
-                 left_robot_file=None, right_robot_file=None):
+                 left_robot_file=None, right_robot_file=None, window_size=5):
         self.train_config_name = train_config_name
         self.model_name = model_name
         self.checkpoint_id = checkpoint_id
@@ -47,7 +47,8 @@ class PI0:
             robotwin_repo_id=assets_id,
             denoise_steps_range=denoise_steps_range,
             pi0_step=pi0_step,
-            robot_config=robot_config
+            robot_config=robot_config,
+            window_size=window_size
             )
         print("loading model success!")
         self.img_size = (224, 224)

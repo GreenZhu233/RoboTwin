@@ -27,6 +27,7 @@ def get_model(usr_args):
                                                               usr_args["checkpoint_id"], usr_args["pi0_step"])
     min_denoise_steps = usr_args.get("min_denoise_steps", 10)
     max_denoise_steps = usr_args.get("max_denoise_steps", 10)
+    window_size = usr_args.get("window_size", 5)
     
     # Get robot config from embodiment config (supports multiple robot types)
     left_robot_file = usr_args.get("left_robot_file", None)
@@ -36,7 +37,7 @@ def get_model(usr_args):
         return PI0(train_config_name, model_name, checkpoint_id, pi0_step, 
                    left_robot_file=left_robot_file, right_robot_file=right_robot_file)
     return PI0(train_config_name, model_name, checkpoint_id, pi0_step, (min_denoise_steps, max_denoise_steps),
-               left_robot_file=left_robot_file, right_robot_file=right_robot_file)
+               left_robot_file=left_robot_file, right_robot_file=right_robot_file, window_size=window_size)
 
 
 def eval(TASK_ENV, model, observation):

@@ -68,6 +68,7 @@ class Policy(BasePolicy):
         is_pytorch: bool = False,
         denoise_steps_range: tuple[int, int] | None = None,
         pi0_step: int = 16,
+        window_size: int = 5
     ):
         """Initialize the Policy.
 
@@ -90,6 +91,7 @@ class Policy(BasePolicy):
         self._metadata = metadata or {}
         self._is_pytorch_model = is_pytorch
         self._pytorch_device = pytorch_device
+        self._window_size = window_size
 
         # Initialize forward kinematics calculators if robot config is provided in metadata
         self._left_fk_calculator = None
@@ -114,7 +116,7 @@ class Policy(BasePolicy):
             
             self._min_steps, self._max_steps = denoise_steps_range
             self._replan_steps = pi0_step
-            self._windowed_trajectory_distance = WindowedTrajectoryDistance(window_size=5)
+            self._windowed_trajectory_distance = WindowedTrajectoryDistance(window_size=self._window_size)
 
     def _init_fk_calculators(self, robot_config: dict):
         """Initialize forward kinematics calculators from robot config.

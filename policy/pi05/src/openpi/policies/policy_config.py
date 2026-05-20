@@ -27,6 +27,7 @@ def create_trained_policy(
     denoise_steps_range: tuple[int, int] | None = None,
     pi0_step: int = 16,
     robot_config: dict | None = None,
+    window_size: int = 5
 ) -> _policy.Policy:
     """Create a policy from a trained checkpoint.
 
@@ -104,5 +105,6 @@ def create_trained_policy(
         is_pytorch=is_pytorch,
         pytorch_device=pytorch_device if is_pytorch else None,
         denoise_steps_range=denoise_steps_range,
-        pi0_step = pi0_step
+        pi0_step = pi0_step,
+        window_size = window_size
     )
