@@ -64,7 +64,7 @@ def get_embodiment_config(robot_file):
     return embodiment_args
 
 
-def main(usr_args):
+def main(usr_args: dict):
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     task_name = usr_args["task_name"]
     task_config = usr_args["task_config"]
@@ -199,8 +199,9 @@ def main(usr_args):
         file.write(f"train_config_name: {usr_args['train_config_name']}\n")
         file.write(f"model_name: {usr_args['model_name']}\n")
         file.write(f"seed: {seed}\n")
-        file.write(f"min_denoise_steps: {usr_args['min_denoise_steps']}\n")
-        file.write(f"max_denoise_steps: {usr_args['max_denoise_steps']}\n\n")
+        file.write(f"min_denoise_steps: {usr_args.get('min_denoise_steps','none')}\n")
+        file.write(f"max_denoise_steps: {usr_args.get('max_denoise_steps','none')}\n")
+        file.write(f"window_size: {usr_args.get('window_size','none')}\n\n")
         file.write(f"Total Eval Time: {_eval_elapsed}s\n\n")
         # file.write(str(task_reward) + '\n')
         file.write("\n".join(map(str, np.array(suc_nums) / test_num)))
@@ -254,6 +255,23 @@ def eval_policy(task_name,
     cold_threshold_ms = 200  # cold CUDA compilation takes 1000+ms, warm is <100ms
 
     while warmup_cnt < max_warmup_episodes:
+        render_freq = args["render_freq"]
+        args["render_freq"] = 0
+        try:
+            TASK_ENV.setup_demo(now_ep_num=-1, seed=warmup_seed, is_test=True, **args)
+            episode_info = TASK_ENV.play_once()
+            TASK_ENV.close_env()
+        except UnStableError as e:
+            TASK_ENV.close_env()
+            warmup_seed += 1
+            args["render_freq"] = render_freq
+            continue
+        except Exception as e:
+            TASK_ENV.close_env()
+            warmup_seed += 1
+            args["render_freq"] = render_freq
+            print("error occurs: " + str(e))
+            continue
         try:
             TASK_ENV.setup_demo(now_ep_num=-1, seed=warmup_seed, is_test=True, **args)
         except UnStableError:
@@ -261,8 +279,8 @@ def eval_policy(task_name,
             TASK_ENV.close_env()
             warmup_seed += 1
             continue
-        except Exception:
-            print(f"Warmup: error at seed {warmup_seed}, retrying...")
+        except Exception as e:
+            print(f"Warmup: error at seed {warmup_seed}: {e}")
             TASK_ENV.close_env()
             warmup_seed += 1
             continue
@@ -281,7 +299,7 @@ def eval_policy(task_name,
 
         # Check if all denoise_steps are sufficiently warmed up
         all_ready = True
-        for d in range(min_denoise_steps, max_denoise_steps + 1):
+        for d in range(min(min_denoise_steps + 1, max_denoise_steps), max_denoise_steps + 1):
             times = denoise_times[d]
             if len(times) < 2:
                 all_ready = False
