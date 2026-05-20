@@ -11,7 +11,9 @@ seed=${5}
 gpu_id=${6}
 min_denoise_steps=${7:-10}
 max_denoise_steps=${8:-10}
+window_size=${9:-5}
 
+export CUDA_DEVICE_ORDER=PCI_BUS_ID
 export CUDA_VISIBLE_DEVICES=${gpu_id}
 echo -e "\033[33mgpu id (to use): ${gpu_id}\033[0m"
 
@@ -29,4 +31,5 @@ python script/eval_policy.py --config policy/$policy_name/deploy_policy.yml \
     --seed ${seed} \
     --policy_name ${policy_name} \
     --min_denoise_steps ${min_denoise_steps} \
-    --max_denoise_steps ${max_denoise_steps}
+    --max_denoise_steps ${max_denoise_steps} \
+    --window_size ${window_size}

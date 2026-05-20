@@ -3,11 +3,7 @@
 # eval_all.sh — 批量评测 envs 目录下所有任务
 #
 # 用法:
-#   nohup bash eval_all.sh > /tmp/eval_all.log 2>&1 &
-#
-# 每个任务执行两次:
-#   1. min_denoise=10, max_denoise=10
-#   2. min_denoise=1,  max_denoise=10
+#   nohup bash eval_all.sh <GPU_ID> <MIN_STEPS> <MAX_STEPS> <WINDOW_SIZE> > /tmp/eval_all.log 2>&1 &
 #
 
 set -euo pipefail
@@ -70,11 +66,22 @@ TASKS=(
 )
 # ==========================================================
 
+# ======================== 参数解析 ========================
+if [ $# -lt 4 ]; then
+    echo "用法: $0 <GPU_ID> <MIN_STEPS> <MAX_STEPS> <WINDOW_SIZE>"
+    echo "示例: $0 1 10 10 5"
+    exit 1
+fi
+
+GPU_ID="$1"
+MIN_STEPS="$2"
+MAX_STEPS="$3"
+WINDOW_SIZE="$4"
+
 TASK_CONFIG="demo_clean"
 TRAIN_CONFIG="pi05_base_finetune_on_robotwin_clean_randomized_joint_training"
 MODEL_NAME="pi05"
 SEED="0"
-GPU_ID="3"
 
 LOG_ROOT="$SCRIPT_DIR/eval_logs"
 mkdir -p "$LOG_ROOT"
@@ -94,38 +101,29 @@ echo "================================================"
 for task_name in "${TASKS[@]}"; do
     CURRENT=$((CURRENT + 1))
 
-    for run_label in "steps10-10" "steps1-10"; do
-        if [ "$run_label" = "steps10-10" ]; then
-            MIN_STEPS=10
-            MAX_STEPS=10
-        else
-            MIN_STEPS=1
-            MAX_STEPS=10
-        fi
+    LOG_FILE="${LOG_ROOT}/${task_name}_${MIN_STEPS}_${MAX_STEPS}.log"
 
-        LOG_FILE="${LOG_ROOT}/${task_name}_${run_label}.log"
+    echo "[${CURRENT}/${TOTAL}] ${task_name} (min=${MIN_STEPS}, max=${MAX_STEPS}) — $(date '+%H:%M:%S')"
 
-        echo "[${CURRENT}/${TOTAL}] ${task_name} (min=${MIN_STEPS}, max=${MAX_STEPS}) — $(date '+%H:%M:%S')"
+    source .venv/bin/activate
+    bash eval.sh \
+        "${task_name}" \
+        "${TASK_CONFIG}" \
+        "${TRAIN_CONFIG}" \
+        "${MODEL_NAME}" \
+        "${SEED}" \
+        "${GPU_ID}" \
+        "${MIN_STEPS}" \
+        "${MAX_STEPS}" \
+        "${WINDOW_SIZE}"
+        > "$LOG_FILE" 2>&1
 
-        source .venv/bin/activate
-        bash eval.sh \
-            "${task_name}" \
-            "${TASK_CONFIG}" \
-            "${TRAIN_CONFIG}" \
-            "${MODEL_NAME}" \
-            "${SEED}" \
-            "${GPU_ID}" \
-            "${MIN_STEPS}" \
-            "${MAX_STEPS}" \
-            > "$LOG_FILE" 2>&1
-
-        RC=$?
-        if [ $RC -ne 0 ]; then
-            echo "  !! FAILED (exit=${RC}), see ${LOG_FILE}"
-        else
-            echo "  -> done"
-        fi
-    done
+    RC=$?
+    if [ $RC -ne 0 ]; then
+        echo "  !! FAILED (exit=${RC}), see ${LOG_FILE}"
+    else
+        echo "  -> done"
+    fi
 done
 
 echo ""
